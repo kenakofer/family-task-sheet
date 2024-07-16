@@ -119,7 +119,7 @@ function processTask(row, index, rLookup, tLookup, todaysTasksHeaders, existingT
     var recurringKey = row[rLookup[COL_RECURRING_KEY]];
 
     if (taskName === "") return {};
-    if (daysUntilNext > 0) return {};
+    if (daysUntilNext > .2) return {}; // If it would have been scheduled in the next 5 hours, that's fine
 
     var taskExists = existingTasks.some(function (task) {
         return task[tLookup[COL_RECURRING_KEY]] === recurringKey && !task[tLookup[COL_COMPLETED]];
@@ -151,10 +151,7 @@ function createNewTask(row, rLookup, tLookup, todaysTasksHeaders, today) {
 
 /*
 TODO:
-  Save datetime into Active!Completed column, and Recurring!Last completed time
-  Activate automatic task additions daily
   Add one-off task interface
-
 */
 
 
