@@ -42,20 +42,21 @@ function refreshMainFilter() {
 
 }
 
-function verifyRecurringKeys(data) {
+function verifyRecurringKeys(data, rLookup) {
     var recurringKeys = [];
-    var duplicateKeys = [];
-    var missingKeys = [];
-    data.forEach(function (row, index) {
-        var key = row[COL_RECURRING_KEY];
+    return data.every(function (row) {
+        var key = row[rLookup[COL_RECURRING_KEY]];
+        if (key === "") {
+            return false;
+        }
+
         if (recurringKeys.includes(key)) {
-            duplicateKeys.push(key);
+            return false;
         } else {
             recurringKeys.push(key);
+            return true;
         }
     });
-
-    return duplicateKeys.length === 0 && missingKeys.length === 0;
 }
 
 
@@ -73,9 +74,7 @@ function updateTodaysTasks() {
     var data = recurringSheet.getDataRange().getValues();
     data.shift(); // Remove header row
 
-    if (!verifyRecurringKeys(data)) {
-        //Show popup
-        SpreadsheetApp.getUi().alert("Duplicate or missing recurring keys found, make sure each recurring task has a unique key.");
+    if (!verifyRecurringKeys(data, rLookup)) {
         throw new Error("Duplicate or missing recurring keys found");
     }
 
