@@ -1,15 +1,26 @@
 // Constants for sheet names
 const RECURRING_SHEET_NAME = "Recurring";
 const TODAYS_TASKS_SHEET_NAME = "Active";
+const MAIN_SHEET_NAME = "Main";
+const DEBUG_SHEET_NAME = "Debug Log";
 
-// Constants for column names
+// Constants for column names in Recurring sheet
 const COL_TASK_NAME = "Task";
 const COL_DAYS_UNTIL_NEXT = "Days until next schedule";
 const COL_LAST_ADDED_TIME = "Last added time";
+const COL_RECURRING_KEY = "Recurring key";
+const COL_LAST_COMPLETED_TIME = "Last completed time";
+
+// Constants for column names in Active sheet
 const COL_DATE_ADDED = "Date Added";
 const COL_COMPLETED = "Completed";
-const COL_ACTIVE_ROW = "Active row"
-const COL_RECURRING_KEY = "Recurring key";
+const COL_ACTIVE_ROW = "Active row";
+const COL_OWNER = "Owner";
+
+// Constants for column names in Main sheet
+const COL_COMPLETE = "Complete";
+const COL_REASSIGN = "Reassign";
+const COL_REPROCESSING = "Reprocessing";
 
 // Constants for additional columns in Active sheet
 const ADDITIONAL_COLUMNS = [COL_DATE_ADDED, COL_COMPLETED, COL_ACTIVE_ROW];
@@ -27,10 +38,9 @@ function createHeaderLookup(headers) {
 }
 
 function refreshMainFilter() {
-    const sheetName = "Main";
     const col = 1; // column "A"
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MAIN_SHEET_NAME);
     const filter = sheet.getFilter();
     if (!filter) {
         return;
@@ -39,7 +49,6 @@ function refreshMainFilter() {
     const criteria = filter.getColumnFilterCriteria(col).copy();
     filter.remove();
     r.createFilter().setColumnFilterCriteria(col, criteria);
-
 }
 
 function verifyRecurringKeys(data, rLookup) {
@@ -58,7 +67,6 @@ function verifyRecurringKeys(data, rLookup) {
         }
     });
 }
-
 
 function updateTodaysTasks() {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -154,7 +162,6 @@ TODO:
   Add one-off task interface
 */
 
-
 // Function to acquire the semaphore
 function acquireSemaphore() {
     var lock = LockService.getScriptLock();
@@ -198,19 +205,16 @@ function onEdit(e) {
     logDebug(debugSheet, "onEdit triggered. Sheet: " + sheet.getName());
 
     // Check if the edit was made in the "Main" sheet
-    if (sheet.getName() !== "Main") {
+    if (sheet.getName() !== MAIN_SHEET_NAME) {
         logDebug(debugSheet, "Edit not in Main sheet. Refreshing Main view then exiting.");
         refreshMainFilter();
         return;
     }
 
-
     // Get the column numbers for "Complete", "Row", and "Reassign" columns
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    var completeColNum = headers.indexOf("Complete") + 1;
-
-    var reassignColNum = headers.indexOf("Reassign") + 1;
-
+    var completeColNum = headers.indexOf(COL_COMPLETE) + 1;
+    var reassignColNum = headers.indexOf(COL_REASSIGN) + 1;
 
     if (completeColNum < e.range.getColumn() || completeColNum > e.range.getLastColumn()) {
         if (reassignColNum < e.range.getColumn() || reassignColNum > e.range.getLastColumn()) {
@@ -253,9 +257,8 @@ function onEdit(e) {
     try {
         logDebug(debugSheet, "Starting processing.");
         var rowColNum = headers.indexOf(COL_ACTIVE_ROW) + 1;
-        var reprocessingColNum = headers.indexOf("Reprocessing") + 1;
-        var recurringForeignKeyCol = headers.indexOf("Recurring key") + 1;
-
+        var reprocessingColNum = headers.indexOf(COL_REPROCESSING) + 1;
+        var recurringForeignKeyCol = headers.indexOf(COL_RECURRING_KEY) + 1;
 
         // Hide "Complete" and "Reassign" columns
         sheet.hideColumns(completeColNum);
@@ -278,19 +281,18 @@ function onEdit(e) {
         var currentState = getColumnState();
 
         // Process the state immediately
-        var activeSheet = ss.getSheetByName("Active");
+        var activeSheet = ss.getSheetByName(TODAYS_TASKS_SHEET_NAME);
         var activeData = activeSheet.getDataRange().getValues();
         var activeHeaders = activeData[0];
-        var completedColIndex = activeHeaders.indexOf("Completed");
+        var completedColIndex = activeHeaders.indexOf(COL_COMPLETED);
         var rowColIndex = activeHeaders.indexOf(COL_ACTIVE_ROW);
-        var ownerColIndex = activeHeaders.indexOf("Owner");
+        var ownerColIndex = activeHeaders.indexOf(COL_OWNER);
 
-        var recurringSheet = ss.getSheetByName("Recurring");
+        var recurringSheet = ss.getSheetByName(RECURRING_SHEET_NAME);
         var recurringData = recurringSheet.getDataRange().getValues();
         var recurringHeaders = recurringData[0];
-        var recurringKeyColIndex = recurringHeaders.indexOf("Recurring key");
-        var recurringLastCompletedIndex = recurringHeaders.indexOf("Last completed time");
-
+        var recurringKeyColIndex = recurringHeaders.indexOf(COL_RECURRING_KEY);
+        var recurringLastCompletedIndex = recurringHeaders.indexOf(COL_LAST_COMPLETED_TIME);
 
         logDebug(debugSheet, "Processing state. Headers: Completed column in Active: " + (completedColIndex + 1) +
             ", Row column in Active: " + (rowColIndex + 1) + ", Owner column in Active: " + (ownerColIndex + 1));
@@ -386,9 +388,9 @@ function resetProcessingState() {
 }
 
 function getOrCreateDebugSheet(ss) {
-    var debugSheet = ss.getSheetByName("Debug Log");
+    var debugSheet = ss.getSheetByName(DEBUG_SHEET_NAME);
     if (!debugSheet) {
-        debugSheet = ss.insertSheet("Debug Log");
+        debugSheet = ss.insertSheet(DEBUG_SHEET_NAME);
         debugSheet.appendRow(["Timestamp", "Message"]);
     }
     return debugSheet;
