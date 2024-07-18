@@ -90,7 +90,7 @@ function updateTodaysTasks() {
 
     var data = recurringSheet.getDataRange().getValues();
     data.shift(); // Remove header row
-    
+
     var badKey = findBadKey(data, rLookup);
 
     if (badKey) {
@@ -170,13 +170,60 @@ function createNewTask(row, rLookup, tLookup, todaysTasksHeaders, today) {
     return newTask;
 }
 
-/*
-TODO:
-  Add one-off task interface
-*/
+
+// Function that creates a one-off task with name taken from a cell and adds it to the "Active" sheet
+function addOneOffTaskFromCell(cellLocation, owner) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var taskName = ss.getRange(cellLocation).getValue();
+
+    if (taskName === "") {
+        return false;
+    }
+
+    var activeSheet = ss.getSheetByName(TODAYS_TASKS_SHEET_NAME);
+    var activeData = activeSheet.getDataRange().getValues();
+    var activeHeaders = activeData[0];
+    var tLookup = createHeaderLookup(activeHeaders);
+
+    var newTask = new Array(activeHeaders.length);
+    newTask[tLookup[COL_TASK_NAME]] = ss.getRange(cellLocation).getValue();
+    newTask[tLookup[COL_OWNER]] = owner;
+    newTask[tLookup[COL_DATE_ADDED]] = new Date();
+    newTask[tLookup[COL_COMPLETED]] = false;
+    newTask[tLookup[COL_ACTIVE_ROW]] = "=ROW()";
+
+    logDebug(getOrCreateDebugSheet(ss), "Adding one-off task: " + newTask[tLookup[COL_TASK_NAME]]);
+
+    // Append the new task to the "Active" sheet
+    activeSheet.appendRow(newTask);
+
+    // Clear the cell
+    ss.getRange(cellLocation).setValue("");
+
+    return true;
+}
+
+const oneOffTaskRows = [2, 51, 100];
+
+// Function to create one off task using the text in Main sheet J2
+function addOneOffTaskA() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var owner = ss.getRange("B" + oneOffTaskRows[0]).getValue();
+    addOneOffTaskFromCell("J" + oneOffTaskRows[0], owner) && refreshMainFilter();
+}
+function addOneOffTaskB() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var owner = ss.getRange("B" + oneOffTaskRows[1]).getValue();
+    addOneOffTaskFromCell("J" + oneOffTaskRows[1], owner) && refreshMainFilter();
+}
+function addOneOffTaskC() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var owner = ""
+    addOneOffTaskFromCell("J" + oneOffTaskRows[2], owner) && refreshMainFilter();
+}
+
 
 function onEdit(e) {
-    var scriptProperties = PropertiesService.getScriptProperties();
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var debugSheet = getOrCreateDebugSheet(ss);
     var sheet = e.source.getActiveSheet();
@@ -194,7 +241,7 @@ function onEdit(e) {
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var completeColNum = headers.indexOf(COL_COMPLETE) + 1;
     var reassignColNum = headers.indexOf(COL_REASSIGN) + 1;
-    
+
     // Log the cell that was edited
     logDebug(debugSheet, "Edit cell: " + e.range.getA1Notation());
 
@@ -209,6 +256,13 @@ function onEdit(e) {
         logDebug(debugSheet, "Edited column 'Complete'");
     }
 
+    // Check if it's a one-off task row, and ignore
+    if (oneOffTaskRows.includes(e.range.getRow())) {
+        logDebug(debugSheet, "Edit in one-off task row. Ignoring.");
+        return;
+    }
+
+    var scriptProperties = PropertiesService.getScriptProperties();
     // If we're already processing, undo the edit and inform the user
     if (scriptProperties.getProperty('isScriptEditing') === 'true') {
         logDebug(debugSheet, "Edit attempted while processing. Undoing edit.");
@@ -232,7 +286,18 @@ function onEdit(e) {
         return;
     }
 
+    runMainUpdate();
+}
+
+function runMainUpdate() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var activeSheet = ss.getSheetByName(TODAYS_TASKS_SHEET_NAME);
+    var mainSheet = ss.getSheetByName(MAIN_SHEET_NAME);
+    var debugSheet = getOrCreateDebugSheet(ss);
+    var headers = mainSheet.getRange(1, 1, 1, mainSheet.getLastColumn()).getValues()[0];
+
     // Set processing flag
+    var scriptProperties = PropertiesService.getScriptProperties();
     scriptProperties.setProperty('isScriptEditing', 'true');
 
     // Use a try-finally block to ensure the processing flag is always reset
@@ -241,17 +306,18 @@ function onEdit(e) {
         var rowColNum = headers.indexOf(COL_ACTIVE_ROW) + 1;
         var reprocessingColNum = headers.indexOf(COL_REPROCESSING) + 1;
         var recurringForeignKeyCol = headers.indexOf(COL_RECURRING_KEY) + 1;
+        var completeColNum = headers.indexOf(COL_COMPLETE) + 1;
+        var reassignColNum = headers.indexOf(COL_REASSIGN) + 1;
 
         // Hide "Complete" and "Reassign" columns
-        sheet.hideColumns(completeColNum);
-        sheet.hideColumns(reassignColNum);
-        sheet.showColumns(reprocessingColNum);
+        mainSheet.hideColumns(completeColNum);
+        mainSheet.hideColumns(reassignColNum);
+        mainSheet.showColumns(reprocessingColNum);
         logDebug(debugSheet, "Hidden 'Complete' and 'Reassign' columns");
 
         logDebug(debugSheet, "Headers: Complete column: " + completeColNum + ", Row column: " + rowColNum + ", Reassign column: " + reassignColNum);
 
         // Process the state immediately
-        var activeSheet = ss.getSheetByName(TODAYS_TASKS_SHEET_NAME);
         var activeData = activeSheet.getDataRange().getValues();
         var activeHeaders = activeData[0];
         var completedColIndex = activeHeaders.indexOf(COL_COMPLETED);
@@ -265,7 +331,7 @@ function onEdit(e) {
         var recurringNextScheduledIndex = recurringHeaders.indexOf(COL_NEXT_SCHEDULED_DATE);
         var recurringScheduleFromCompletionIndex = recurringHeaders.indexOf(COL_SCHEDULE_FROM_COMPLETION);
         var recurringDaysIndex = recurringHeaders.indexOf(COL_DAYS);
-        
+
         logDebug(debugSheet, "Processing state. Headers: Completed column in Active: " + (completedColIndex + 1) +
             ", Row column in Active: " + (rowColIndex + 1) + ", Owner column in Active: " + (ownerColIndex + 1));
 
@@ -273,7 +339,7 @@ function onEdit(e) {
 
         // Function to get the current state of the "Complete" and "Reassign" columns
         function getColumnState() {
-            var data = sheet.getRange(MAIN_DATA_OFFSET, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+            var data = mainSheet.getRange(MAIN_DATA_OFFSET, 1, mainSheet.getLastRow() - 1, mainSheet.getLastColumn()).getValues();
             return data.map(row => ({
                 complete: row[completeColNum - 1],
                 reassign: row[reassignColNum - 1]
@@ -287,17 +353,23 @@ function onEdit(e) {
 
         currentState.forEach((state, rev_index) => {
             var index = currentState.length - rev_index - 1;
+
+            // Skip one-off task rows
+            if (oneOffTaskRows.includes(index + MAIN_DATA_OFFSET)) {
+                return;
+            }
+
             if (state.complete || state.reassign) {
-                var sourceRow = sheet.getRange(index + MAIN_DATA_OFFSET, rowColNum).getValue();
+                var sourceRow = mainSheet.getRange(index + MAIN_DATA_OFFSET, rowColNum).getValue();
                 logDebug(debugSheet, "Processing row " + (index + MAIN_DATA_OFFSET) + " in Main, sourceRow: " + sourceRow);
 
                 if (state.complete) {
                     changesCount++;
                     // Clear the checkbox
-                    // sheet.getRange(index + MAIN_DATA_OFFSET, completeColNum).setValue(false);
+                    // mainSheet.getRange(index + MAIN_DATA_OFFSET, completeColNum).setValue(false);
                     // logDebug(debugSheet, "Cleared checkbox in Main sheet row " + (index + MAIN_DATA_OFFSET));
 
-                    var recurringKey = sheet.getRange(index + MAIN_DATA_OFFSET, recurringForeignKeyCol).getValue();
+                    var recurringKey = mainSheet.getRange(index + MAIN_DATA_OFFSET, recurringForeignKeyCol).getValue();
                     if (recurringKey) {
                         logDebug(debugSheet, "Looking for a recurring task with key " + recurringKey + " in " + recurringData.length + " tasks");
 
@@ -305,7 +377,7 @@ function onEdit(e) {
                             if (row[recurringKeyColIndex] == recurringKey) {
                                 logDebug(debugSheet, "Found at row " + (rindex + 1));
                                 logDebug(debugSheet, JSON.stringify(row));
-                                
+
                                 if (row[recurringScheduleFromCompletionIndex]) {
                                     recurringSheet.getRange(rindex + 1, recurringNextScheduledIndex + 1).setValue(new Date(new Date().getTime() + row[recurringDaysIndex] * 24 * 60 * 60 * 1000));
                                 }
@@ -332,17 +404,17 @@ function onEdit(e) {
                     }
 
                     // Clear the Reassign cell in the Main sheet
-                    // sheet.getRange(index + MAIN_DATA_OFFSET, reassignColNum).setValue("");
+                    // mainSheet.getRange(index + MAIN_DATA_OFFSET, reassignColNum).setValue("");
                     // logDebug(debugSheet, "Cleared Reassign cell in Main sheet row " + (index + MAIN_DATA_OFFSET));
                 }
             }
         });
-        
+
         // Clear all the checkboxes
-        sheet.getRange(MAIN_DATA_OFFSET, completeColNum, sheet.getLastRow() - MAIN_DATA_OFFSET, 1).setValue(false);
+        mainSheet.getRange(MAIN_DATA_OFFSET, completeColNum, mainSheet.getLastRow() - MAIN_DATA_OFFSET, 1).setValue("");
         logDebug(debugSheet, "Cleared all checkboxes in Main sheet");
         // Clear all the reassign cells
-        sheet.getRange(MAIN_DATA_OFFSET, reassignColNum, sheet.getLastRow() - MAIN_DATA_OFFSET, 1).setValue("");
+        mainSheet.getRange(MAIN_DATA_OFFSET, reassignColNum, mainSheet.getLastRow() - MAIN_DATA_OFFSET, 1).setValue("");
         logDebug(debugSheet, "Cleared all Reassign cells in Main sheet");
 
         logDebug(debugSheet, "Processed " + changesCount + " changes");
@@ -353,9 +425,9 @@ function onEdit(e) {
         logDebug(debugSheet, "Error occurred: " + error.toString());
     } finally {
         // Unhide "Complete" and "Reassign" columns
-        sheet.showColumns(completeColNum);
-        sheet.showColumns(reassignColNum);
-        sheet.hideColumns(reprocessingColNum);
+        mainSheet.showColumns(completeColNum);
+        mainSheet.showColumns(reassignColNum);
+        mainSheet.hideColumns(reprocessingColNum);
 
         logDebug(debugSheet, "Unhidden 'Complete' and 'Reassign' columns");
 
@@ -406,7 +478,7 @@ function addMainFilter() {
     var range = sheet.getRange("B:B");
     var filter = range.createFilter();
     filter.setColumnFilterCriteria(2, SpreadsheetApp.newFilterCriteria().whenFormulaSatisfied("=AND(NOT(ISBLANK(B:B)), NOT(REGEXMATCH(B:B, \"Task\")))").build());
-    
+
     // Hide all columns except a few
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     headers.forEach(function (header, index) {
@@ -414,7 +486,7 @@ function addMainFilter() {
             sheet.hideColumns(index + 1);
         }
     });
-    
+
     // Hide row 1
     sheet.hideRows(1);
 }
@@ -428,12 +500,12 @@ function removeMainFilter() {
     if (filter) {
         filter.remove();
     }
-    
+
     // Unhide all columns
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     headers.forEach(function (header, index) {
         sheet.showColumns(index + 1);
     });
-    
+
     sheet.showRows(1);
 }
