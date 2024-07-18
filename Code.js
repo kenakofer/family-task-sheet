@@ -194,6 +194,9 @@ function onEdit(e) {
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var completeColNum = headers.indexOf(COL_COMPLETE) + 1;
     var reassignColNum = headers.indexOf(COL_REASSIGN) + 1;
+    
+    // Log the cell that was edited
+    logDebug(debugSheet, "Edit cell: " + e.range.getA1Notation());
 
     if (completeColNum < e.range.getColumn() || completeColNum > e.range.getLastColumn()) {
         if (reassignColNum < e.range.getColumn() || reassignColNum > e.range.getLastColumn()) {
@@ -247,18 +250,6 @@ function onEdit(e) {
 
         logDebug(debugSheet, "Headers: Complete column: " + completeColNum + ", Row column: " + rowColNum + ", Reassign column: " + reassignColNum);
 
-        // Function to get the current state of the "Complete" and "Reassign" columns
-        function getColumnState() {
-            var data = sheet.getRange(MAIN_DATA_OFFSET, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-            return data.map(row => ({
-                complete: row[completeColNum - 1],
-                reassign: row[reassignColNum - 1]
-            }));
-        }
-
-        // Get the state after the edit
-        var currentState = getColumnState();
-
         // Process the state immediately
         var activeSheet = ss.getSheetByName(TODAYS_TASKS_SHEET_NAME);
         var activeData = activeSheet.getDataRange().getValues();
@@ -280,24 +271,35 @@ function onEdit(e) {
 
         var changesCount = 0;
 
+        // Function to get the current state of the "Complete" and "Reassign" columns
+        function getColumnState() {
+            var data = sheet.getRange(MAIN_DATA_OFFSET, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+            return data.map(row => ({
+                complete: row[completeColNum - 1],
+                reassign: row[reassignColNum - 1]
+            }));
+        }
+
+        // Get the state after the edit
+        var currentState = getColumnState();
+
         currentState.reverse();
 
         currentState.forEach((state, rev_index) => {
             var index = currentState.length - rev_index - 1;
             if (state.complete || state.reassign) {
-                changesCount++;
                 var sourceRow = sheet.getRange(index + MAIN_DATA_OFFSET, rowColNum).getValue();
                 logDebug(debugSheet, "Processing row " + (index + MAIN_DATA_OFFSET) + " in Main, sourceRow: " + sourceRow);
 
                 if (state.complete) {
+                    changesCount++;
                     // Clear the checkbox
-                    sheet.getRange(index + MAIN_DATA_OFFSET, completeColNum).setValue(false);
-                    logDebug(debugSheet, "Cleared checkbox in Main sheet row " + (index + MAIN_DATA_OFFSET));
+                    // sheet.getRange(index + MAIN_DATA_OFFSET, completeColNum).setValue(false);
+                    // logDebug(debugSheet, "Cleared checkbox in Main sheet row " + (index + MAIN_DATA_OFFSET));
 
                     var recurringKey = sheet.getRange(index + MAIN_DATA_OFFSET, recurringForeignKeyCol).getValue();
                     if (recurringKey) {
                         logDebug(debugSheet, "Looking for a recurring task with key " + recurringKey + " in " + recurringData.length + " tasks");
-                        logDebug(debugSheet, JSON.stringify(recurringData));
 
                         if (!recurringData.some(function (row, rindex) {
                             if (row[recurringKeyColIndex] == recurringKey) {
@@ -320,6 +322,7 @@ function onEdit(e) {
                 }
 
                 if (state.reassign) {
+                    changesCount++;
                     if (state.reassign.toLowerCase() === "unassign") {
                         activeSheet.getRange(sourceRow, ownerColIndex + 1).setValue("");
                         logDebug(debugSheet, "Unassigned owner in Active sheet row " + (sourceRow));
@@ -329,11 +332,18 @@ function onEdit(e) {
                     }
 
                     // Clear the Reassign cell in the Main sheet
-                    sheet.getRange(index + MAIN_DATA_OFFSET, reassignColNum).setValue("");
-                    logDebug(debugSheet, "Cleared Reassign cell in Main sheet row " + (index + MAIN_DATA_OFFSET));
+                    // sheet.getRange(index + MAIN_DATA_OFFSET, reassignColNum).setValue("");
+                    // logDebug(debugSheet, "Cleared Reassign cell in Main sheet row " + (index + MAIN_DATA_OFFSET));
                 }
             }
         });
+        
+        // Clear all the checkboxes
+        sheet.getRange(MAIN_DATA_OFFSET, completeColNum, sheet.getLastRow() - MAIN_DATA_OFFSET, 1).setValue(false);
+        logDebug(debugSheet, "Cleared all checkboxes in Main sheet");
+        // Clear all the reassign cells
+        sheet.getRange(MAIN_DATA_OFFSET, reassignColNum, sheet.getLastRow() - MAIN_DATA_OFFSET, 1).setValue("");
+        logDebug(debugSheet, "Cleared all Reassign cells in Main sheet");
 
         logDebug(debugSheet, "Processed " + changesCount + " changes");
 
