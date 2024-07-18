@@ -6,10 +6,10 @@ const DEBUG_SHEET_NAME = "Debug Log";
 
 // Constants for column names in Recurring sheet
 const COL_TASK_NAME = "Task";
-const COL_DAYS_UNTIL_NEXT = "Days until next schedule";
-const COL_LAST_ADDED_TIME = "Last added time";
+const COL_SCHEDULE_FROM_COMPLETION = "Schedule from completion";
+const COL_NEXT_SCHEDULED_DATE = "Next scheduled date";
 const COL_RECURRING_KEY = "Recurring key";
-const COL_LAST_COMPLETED_TIME = "Last completed time";
+const COL_DAYS = "Days";
 
 // Constants for column names in Active sheet
 const COL_DATE_ADDED = "Date Added";
@@ -21,6 +21,7 @@ const COL_OWNER = "Owner";
 const COL_COMPLETE = "Complete";
 const COL_REASSIGN = "Reassign";
 const COL_REPROCESSING = "Reprocessing";
+const COL_URGENCY = "Urgency";
 
 // Constants for additional columns in Active sheet
 const ADDITIONAL_COLUMNS = [COL_DATE_ADDED, COL_COMPLETED, COL_ACTIVE_ROW];
@@ -38,7 +39,7 @@ function createHeaderLookup(headers) {
 }
 
 function refreshMainFilter() {
-    const col = 1; // column "A"
+    const col = 2; // column "B"
 
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MAIN_SHEET_NAME);
     const filter = sheet.getFilter();
@@ -51,21 +52,27 @@ function refreshMainFilter() {
     r.createFilter().setColumnFilterCriteria(col, criteria);
 }
 
-function verifyRecurringKeys(data, rLookup) {
+function findBadKey(data, rLookup) {
     var recurringKeys = [];
-    return data.every(function (row) {
+    var badKey;
+    if (data.every(function (row) {
         var key = row[rLookup[COL_RECURRING_KEY]];
         if (key === "") {
+            badKey = key;
             return false;
         }
-
         if (recurringKeys.includes(key)) {
+            badKey = key;
             return false;
         } else {
             recurringKeys.push(key);
             return true;
         }
-    });
+    })) {
+        return false;
+    } else {
+        return badKey;
+    }
 }
 
 function updateTodaysTasks() {
@@ -74,6 +81,8 @@ function updateTodaysTasks() {
     var todaysTasksSheet = ss.getSheetByName(TODAYS_TASKS_SHEET_NAME);
 
     var recurringHeaders = recurringSheet.getRange(1, 1, 1, recurringSheet.getLastColumn()).getValues()[0];
+    // Cut out any headers after an empty cell ("")
+    recurringHeaders = recurringHeaders.slice(0, recurringHeaders.indexOf(""));
     var rLookup = createHeaderLookup(recurringHeaders);
 
     var todaysTasksHeaders = getOrCreateTodaysTasksHeaders(todaysTasksSheet, recurringHeaders);
@@ -81,9 +90,11 @@ function updateTodaysTasks() {
 
     var data = recurringSheet.getDataRange().getValues();
     data.shift(); // Remove header row
+    
+    var badKey = findBadKey(data, rLookup);
 
-    if (!verifyRecurringKeys(data, rLookup)) {
-        throw new Error("Duplicate or missing recurring keys found");
+    if (badKey) {
+        throw new Error("Duplicate or missing recurring keys found: " + badKey);
     }
 
     var today = new Date();
@@ -123,20 +134,22 @@ function getOrCreateTodaysTasksHeaders(sheet, recurringHeaders) {
 
 function processTask(row, index, rLookup, tLookup, todaysTasksHeaders, existingTasks, today) {
     var taskName = row[rLookup[COL_TASK_NAME]];
-    var daysUntilNext = row[rLookup[COL_DAYS_UNTIL_NEXT]];
+    var nextScheduledDate = row[rLookup[COL_NEXT_SCHEDULED_DATE]];
+    var days = row[rLookup[COL_DAYS]];
     var recurringKey = row[rLookup[COL_RECURRING_KEY]];
 
     if (taskName === "") return {};
-    if (daysUntilNext > .2) return {}; // If it would have been scheduled in the next 5 hours, that's fine
+    if (nextScheduledDate - .2 > today) return {}; // If the next scheduled date is more than .2 days in the future, don't add it
 
     var taskExists = existingTasks.some(function (task) {
-        return task[tLookup[COL_RECURRING_KEY]] === recurringKey && !task[tLookup[COL_COMPLETED]];
+        return task[tLookup[COL_RECURRING_KEY]] == recurringKey && (!task[tLookup[COL_COMPLETED]] || task[tLookup[COL_COMPLETED]] === "false");
     });
 
     if (taskExists) return {};
 
     var newTask = createNewTask(row, rLookup, tLookup, todaysTasksHeaders, today);
-    var update = [index + 2, rLookup[COL_LAST_ADDED_TIME] + 1, today];
+    var newNextScheduledDate = row[rLookup[COL_SCHEDULE_FROM_COMPLETION]] ? "" : new Date(today.getTime() + days * 24 * 60 * 60 * 1000);
+    var update = [index + 2, rLookup[COL_NEXT_SCHEDULED_DATE] + 1, newNextScheduledDate];
 
     return { task: newTask, update: update };
 }
@@ -161,40 +174,6 @@ function createNewTask(row, rLookup, tLookup, todaysTasksHeaders, today) {
 TODO:
   Add one-off task interface
 */
-
-// Function to acquire the semaphore
-function acquireSemaphore() {
-    var lock = LockService.getScriptLock();
-    var acquired = lock.tryLock(10000); // Try to acquire the lock for 10 seconds
-
-    if (acquired) {
-        var props = PropertiesService.getScriptProperties();
-        var isProcessing = props.getProperty('isProcessing');
-
-        if (isProcessing === 'true') {
-            lock.releaseLock();
-            return false;
-        } else {
-            props.setProperty('isProcessing', 'true');
-            lock.releaseLock();
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// Function to release the semaphore
-function releaseSemaphore() {
-    var lock = LockService.getScriptLock();
-    var acquired = lock.tryLock(10000);
-
-    if (acquired) {
-        var props = PropertiesService.getScriptProperties();
-        props.setProperty('isProcessing', 'false');
-        lock.releaseLock();
-    }
-}
 
 function onEdit(e) {
     var scriptProperties = PropertiesService.getScriptProperties();
@@ -292,8 +271,10 @@ function onEdit(e) {
         var recurringData = recurringSheet.getDataRange().getValues();
         var recurringHeaders = recurringData[0];
         var recurringKeyColIndex = recurringHeaders.indexOf(COL_RECURRING_KEY);
-        var recurringLastCompletedIndex = recurringHeaders.indexOf(COL_LAST_COMPLETED_TIME);
-
+        var recurringNextScheduledIndex = recurringHeaders.indexOf(COL_NEXT_SCHEDULED_DATE);
+        var recurringScheduleFromCompletionIndex = recurringHeaders.indexOf(COL_SCHEDULE_FROM_COMPLETION);
+        var recurringDaysIndex = recurringHeaders.indexOf(COL_DAYS);
+        
         logDebug(debugSheet, "Processing state. Headers: Completed column in Active: " + (completedColIndex + 1) +
             ", Row column in Active: " + (rowColIndex + 1) + ", Owner column in Active: " + (ownerColIndex + 1));
 
@@ -322,8 +303,10 @@ function onEdit(e) {
                             if (row[recurringKeyColIndex] == recurringKey) {
                                 logDebug(debugSheet, "Found at row " + (rindex + 1));
                                 logDebug(debugSheet, JSON.stringify(row));
-
-                                recurringSheet.getRange(rindex + 1, recurringLastCompletedIndex + 1).setValue(new Date());
+                                
+                                if (row[recurringScheduleFromCompletionIndex]) {
+                                    recurringSheet.getRange(rindex + 1, recurringNextScheduledIndex + 1).setValue(new Date(new Date().getTime() + row[recurringDaysIndex] * 24 * 60 * 60 * 1000));
+                                }
                                 return true;
                             }
                             return false;
@@ -375,7 +358,10 @@ function onEdit(e) {
 // Add this function to your script
 function onOpen() {
     SpreadsheetApp.getUi()
-        .createMenu('Custom Menu')
+        .createMenu('Task Actions')
+        .addItem('Add Scheduled Tasks', 'updateTodaysTasks')
+        .addItem('Add Main Filter', 'addMainFilter')
+        .addItem('Remove Main Filter', 'removeMainFilter')
         .addItem('Reset Processing State', 'resetProcessingState')
         .addToUi();
 }
@@ -398,4 +384,46 @@ function getOrCreateDebugSheet(ss) {
 
 function logDebug(sheet, message) {
     sheet.appendRow([new Date(), message]);
+}
+
+
+// Function to add the filter:
+//    =AND(NOT(ISBLANK(B:B)), NOT(REGEXMATCH(B:B, "Task")))
+// to the "Main" sheet, column "B"
+
+function addMainFilter() {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MAIN_SHEET_NAME);
+    var range = sheet.getRange("B:B");
+    var filter = range.createFilter();
+    filter.setColumnFilterCriteria(2, SpreadsheetApp.newFilterCriteria().whenFormulaSatisfied("=AND(NOT(ISBLANK(B:B)), NOT(REGEXMATCH(B:B, \"Task\")))").build());
+    
+    // Hide all columns except a few
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    headers.forEach(function (header, index) {
+        if (header !== COL_TASK_NAME && header !== COL_COMPLETE && header !== COL_REASSIGN && header !== COL_URGENCY) {
+            sheet.hideColumns(index + 1);
+        }
+    });
+    
+    // Hide row 1
+    sheet.hideRows(1);
+}
+
+
+// Reversal of addMainFilter
+
+function removeMainFilter() {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MAIN_SHEET_NAME);
+    var filter = sheet.getFilter();
+    if (filter) {
+        filter.remove();
+    }
+    
+    // Unhide all columns
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    headers.forEach(function (header, index) {
+        sheet.showColumns(index + 1);
+    });
+    
+    sheet.showRows(1);
 }
