@@ -139,7 +139,8 @@ function processTask(row, index, rLookup, tLookup, todaysTasksHeaders, existingT
     var recurringKey = row[rLookup[COL_RECURRING_KEY]];
 
     if (taskName === "") return {};
-    if (nextScheduledDate - .2 > today) return {}; // If the next scheduled date is more than .2 days in the future, don't add it
+    var addAfterTime = new Date(new Date(nextScheduledDate).getTime() - .2 * 24 * 60 * 60 * 1000);
+    if (addAfterTime > today) return {}; // If the next scheduled date is more than .2 days in the future, don't add it
 
     var taskExists = existingTasks.some(function (task) {
         return task[tLookup[COL_RECURRING_KEY]] == recurringKey && (!task[tLookup[COL_COMPLETED]] || task[tLookup[COL_COMPLETED]] === "false");
@@ -148,7 +149,7 @@ function processTask(row, index, rLookup, tLookup, todaysTasksHeaders, existingT
     if (taskExists) return {};
 
     var newTask = createNewTask(row, rLookup, tLookup, todaysTasksHeaders, today);
-    var newNextScheduledDate = row[rLookup[COL_SCHEDULE_FROM_COMPLETION]] ? "" : new Date(today.getTime() + days * 24 * 60 * 60 * 1000);
+    var newNextScheduledDate = row[rLookup[COL_SCHEDULE_FROM_COMPLETION]] ? "" : new Date(nextScheduledDate.getTime() + days * 24 * 60 * 60 * 1000);
     var update = [index + 2, rLookup[COL_NEXT_SCHEDULED_DATE] + 1, newNextScheduledDate];
 
     return { task: newTask, update: update };
@@ -424,6 +425,10 @@ function runMainUpdate() {
     } catch (error) {
         logDebug(debugSheet, "Error occurred: " + error.toString());
     } finally {
+        // Reset processing flag
+        scriptProperties.deleteProperty('isScriptEditing');
+        logDebug(debugSheet, "Processing complete. Reset processing flag.");
+
         // Unhide "Complete" and "Reassign" columns
         mainSheet.showColumns(completeColNum);
         mainSheet.showColumns(reassignColNum);
@@ -431,9 +436,6 @@ function runMainUpdate() {
 
         logDebug(debugSheet, "Unhidden 'Complete' and 'Reassign' columns");
 
-        // Reset processing flag
-        scriptProperties.deleteProperty('isScriptEditing');
-        logDebug(debugSheet, "Processing complete. Reset processing flag.");
     }
 }
 
@@ -452,7 +454,8 @@ function resetProcessingState() {
     var scriptProperties = PropertiesService.getScriptProperties();
     scriptProperties.deleteProperty('isScriptEditing');
     scriptProperties.deleteProperty('editInstance');
-    SpreadsheetApp.getUi().alert('Processing state has been reset.');
+    // SpreadsheetApp.getUi().alert('Processing state has been reset.');
+    addMainFilter();
 }
 
 function getOrCreateDebugSheet(ss) {
@@ -475,8 +478,13 @@ function logDebug(sheet, message) {
 
 function addMainFilter() {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MAIN_SHEET_NAME);
+    var filter = sheet.getFilter();
+    if (filter) {
+        filter.remove();
+    }
+
     var range = sheet.getRange("B:B");
-    var filter = range.createFilter();
+    filter = range.createFilter();
     filter.setColumnFilterCriteria(2, SpreadsheetApp.newFilterCriteria().whenFormulaSatisfied("=AND(NOT(ISBLANK(B:B)), NOT(REGEXMATCH(B:B, \"Task\")))").build());
 
     // Hide all columns except a few
