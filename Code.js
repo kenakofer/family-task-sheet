@@ -5,6 +5,7 @@ const DEBUG_SHEET_NAME = "Debug Log";
 
 // Constants for column names in Recurring sheet
 const COL_TASK_NAME = "Task";
+const COL_SCHEDULE = "Schedule";
 const COL_SCHEDULE_FROM_COMPLETION = "Schedule from completion";
 const COL_NEXT_SCHEDULED_DATE = "Next scheduled date";
 const COL_RECURRING_KEY = "Recurring key";
@@ -67,7 +68,9 @@ function updateTodaysTasks() {
 
     var recurringHeaders = recurringSheet.getRange(1, 1, 1, recurringSheet.getLastColumn()).getValues()[0];
     // Cut out any headers after an empty cell ("")
-    recurringHeaders = recurringHeaders.slice(0, recurringHeaders.indexOf(""));
+    if (recurringHeaders.includes("")) {
+      recurringHeaders = recurringHeaders.slice(0, recurringHeaders.indexOf(""));
+    }
     var rLookup = createHeaderLookup(recurringHeaders);
 
     var todaysTasksHeaders = getOrCreateTodaysTasksHeaders(todaysTasksSheet, recurringHeaders);
@@ -124,6 +127,7 @@ function processTask(row, index, rLookup, tLookup, todaysTasksHeaders, existingT
     var recurringKey = row[rLookup[COL_RECURRING_KEY]];
 
     if (taskName === "") return {};
+    if (! row[rLookup[COL_SCHEDULE]]) return {};
     var addAfterTime = new Date(new Date(nextScheduledDate).getTime() - .2 * 24 * 60 * 60 * 1000);
     if (addAfterTime > today) return {}; // If the next scheduled date is more than .2 days in the future, don't add it
 
